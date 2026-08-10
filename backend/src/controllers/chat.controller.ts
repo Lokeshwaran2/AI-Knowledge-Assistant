@@ -13,6 +13,7 @@ import {
   createConversation,
   getConversationMessages,
   getUserConversations,
+  deleteConversation,
 } from '../services/message.service';
 
 // ─── POST /chat ───────────────────────────────────────────────────────────────
@@ -115,4 +116,20 @@ export const getMessages = asyncHandler(async (req: Request, res: Response) => {
   const id = req.params['id'] as string;
   const messages = await getConversationMessages(id);
   res.json({ success: true, messages });
+});
+
+// ─── DELETE /chat/conversations/:id ──────────────────────────────────────────
+
+export const deleteConversationHandler = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Unauthorized.', 401);
+
+  const id = req.params['id'] as string;
+  const deleted = await deleteConversation(id, req.user.userId);
+
+  if (!deleted) {
+    res.status(404).json({ success: false, message: 'Conversation not found.' });
+    return;
+  }
+
+  res.json({ success: true, message: 'Conversation deleted successfully.' });
 });

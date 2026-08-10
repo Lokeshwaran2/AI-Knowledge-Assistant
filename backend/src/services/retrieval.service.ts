@@ -35,7 +35,7 @@ export async function retrieveRelevantChunks(
 
   // Step 4 — Return best matches (already ranked by ChromaDB)
   console.log(
-    `[Retrieval] Found ${rawResults.length} results, ${filtered.length} passed threshold (≤${AI_CONFIG.similarityThreshold})`
+    `[Retrieval] Found ${rawResults.length} results, ${filtered.length} passed threshold (≥${AI_CONFIG.similarityThreshold})`
   );
 
   return filtered;
