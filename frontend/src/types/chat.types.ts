@@ -18,4 +18,6 @@ export type Conversation = {
   message_count: number;
   total_tokens: number;
   created_at: string;
+  updated_at?: string;
+  last_accessed_at?: string;
 };

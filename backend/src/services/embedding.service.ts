@@ -55,20 +55,29 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 
 /**
  * Generate embeddings for multiple texts in batch
- * More efficient than calling generateEmbedding() in a loop
+ * Sub-batches input to prevent ONNX runtime OOM errors on large documents.
  */
-export async function generateEmbeddingsBatch(texts: string[]): Promise<number[][]> {
+export async function generateEmbeddingsBatch(
+  texts: string[],
+  batchSize: number = 32,
+  onProgress?: (processed: number, total: number) => void
+): Promise<number[][]> {
   const pipe = await getEmbeddingPipeline();
-
-  const output = await pipe(texts, { pooling: 'mean', normalize: true });
-
-  // Split flat output into per-text embeddings
   const dim = AI_CONFIG.embeddingDimension;
-  const embeddings: number[][] = [];
+  const allEmbeddings: number[][] = [];
 
-  for (let i = 0; i < texts.length; i++) {
-    embeddings.push(Array.from(output.data.slice(i * dim, (i + 1) * dim) as Float32Array));
+  for (let i = 0; i < texts.length; i += batchSize) {
+    const chunkBatch = texts.slice(i, i + batchSize);
+    const output = await pipe(chunkBatch, { pooling: 'mean', normalize: true });
+
+    for (let j = 0; j < chunkBatch.length; j++) {
+      allEmbeddings.push(Array.from(output.data.slice(j * dim, (j + 1) * dim) as Float32Array));
+    }
+
+    if (onProgress) {
+      onProgress(allEmbeddings.length, texts.length);
+    }
   }
 
-  return embeddings;
+  return allEmbeddings;
 }

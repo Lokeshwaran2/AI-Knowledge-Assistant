@@ -33,6 +33,12 @@ export async function storeMessage(data: StoreMessageData): Promise<void> {
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [uuidv4(), conversationId, userId, role, content, tokensUsed, latencyMs, chunksRetrieved]
   );
+
+  // Touch conversation updated_at for last_accessed_at tracking
+  await pool.query(
+    'UPDATE conversations SET updated_at = NOW() WHERE id = $1',
+    [conversationId]
+  );
 }
 
 /**
@@ -45,6 +51,17 @@ export async function createConversation(userId: string, title?: string): Promis
     [id, userId, title || 'New Conversation']
   );
   return id;
+}
+
+/**
+ * Delete a conversation and all its messages (ON DELETE CASCADE)
+ */
+export async function deleteConversation(conversationId: string, userId: string): Promise<boolean> {
+  const result = await pool.query(
+    'DELETE FROM conversations WHERE id = $1 AND user_id = $2 RETURNING id',
+    [conversationId, userId]
+  );
+  return (result.rowCount ?? 0) > 0;
 }
 
 /**
@@ -61,18 +78,19 @@ export async function getConversationMessages(conversationId: string, limit = 20
 }
 
 /**
- * Get all conversations for a user
+ * Get all conversations for a user with last_accessed_at
  */
 export async function getUserConversations(userId: string) {
   const result = await pool.query(
-    `SELECT c.id, c.title, c.created_at,
+    `SELECT c.id, c.title, c.created_at, c.updated_at,
             COUNT(m.id) as message_count,
-            SUM(m.tokens_used) as total_tokens
+            COALESCE(SUM(m.tokens_used), 0) as total_tokens,
+            COALESCE(MAX(m.created_at), c.updated_at, c.created_at) as last_accessed_at
      FROM conversations c
      LEFT JOIN messages m ON m.conversation_id = c.id
      WHERE c.user_id = $1
      GROUP BY c.id
-     ORDER BY c.created_at DESC`,
+     ORDER BY COALESCE(MAX(m.created_at), c.updated_at, c.created_at) DESC`,
     [userId]
   );
   return result.rows;

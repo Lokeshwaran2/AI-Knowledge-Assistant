@@ -34,6 +34,7 @@ export async function initializeSchema(): Promise<void> {
 
     await client.query(`
       CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+      CREATE EXTENSION IF NOT EXISTS vector;
 
       CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -53,6 +54,17 @@ export async function initializeSchema(): Promise<void> {
         chunk_count INT DEFAULT 0,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS document_chunks (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        chunk_index INT NOT NULL,
+        chunk_text TEXT NOT NULL,
+        embedding vector(384) NOT NULL,
+        source VARCHAR(500),
+        created_at TIMESTAMPTZ DEFAULT NOW()
       );
 
       CREATE TABLE IF NOT EXISTS conversations (
@@ -76,13 +88,15 @@ export async function initializeSchema(): Promise<void> {
       );
 
       CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents(user_id);
+      CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id);
+      CREATE INDEX IF NOT EXISTS idx_document_chunks_user_id ON document_chunks(user_id);
       CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
       CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
       CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
     `);
 
     client.release();
-    console.log('[DB] PostgreSQL ready ✓ (Neon / PostgreSQL)');
+    console.log('[DB] PostgreSQL ready ✓ (Neon / PostgreSQL with pgvector)');
   } catch (err) {
     console.error('[DB] Failed to initialize PostgreSQL schema:', err);
   }
