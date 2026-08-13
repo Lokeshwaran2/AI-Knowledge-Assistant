@@ -164,13 +164,37 @@ export async function generateEmbeddingsBatch(
       allEmbeddings.push(Array.from(output.data.slice(j * dim, (j + 1) * dim) as Float32Array));
     }
 
-    if (onProgress) {
-      onProgress(allEmbeddings.length, texts.length);
+    if (success && allRemoteEmbeddings.length === texts.length) {
+      console.log(`[Embedding] Successfully generated ${texts.length} remote embeddings (0 MB RAM used).`);
+      return allRemoteEmbeddings;
     }
 
     // Yield to Node event loop between batches to let V8 garbage collect ONNX tensors
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 
-  return allEmbeddings;
+  // 2. Local ONNX Engine Fallback
+  try {
+    const pipe = await getLocalEmbeddingPipeline();
+    const dim = AI_CONFIG.embeddingDimension;
+    const allEmbeddings: number[][] = [];
+
+    for (let i = 0; i < texts.length; i += batchSize) {
+      const chunkBatch = texts.slice(i, i + batchSize);
+      const output = await pipe(chunkBatch, { pooling: 'mean', normalize: true });
+
+      for (let j = 0; j < chunkBatch.length; j++) {
+        allEmbeddings.push(Array.from(output.data.slice(j * dim, (j + 1) * dim) as Float32Array));
+      }
+
+      if (onProgress) {
+        onProgress(allEmbeddings.length, texts.length);
+      }
+    }
+
+    return allEmbeddings;
+  } catch (localErr) {
+    console.error('[Embedding] Local ONNX engine failed:', localErr);
+    throw new Error('Embedding generation failed on both remote API and local engine.');
+  }
 }
