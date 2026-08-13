@@ -14,7 +14,6 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
   const { user, logout } = useAuth();
   const {
     conversations,
-    loadConversation,
     startNewConversation,
     deleteConversation,
     activeConversationId,

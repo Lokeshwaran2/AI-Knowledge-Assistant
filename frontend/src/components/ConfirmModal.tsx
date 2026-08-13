@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 
 interface ConfirmModalProps {
   isOpen: boolean;
