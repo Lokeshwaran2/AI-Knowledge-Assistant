@@ -2,12 +2,9 @@
 // Server configuration
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SERVER_CONFIG = void 0;
-const extraCorsOrigins = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "https://aio-gray.vercel.app",
-    "https://aio-git-main-lokeshwaran-rs-projects.vercel.app"
-];
+const extraCorsOrigins = process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim())
+    : [];
 exports.SERVER_CONFIG = {
     port: parseInt(process.env.PORT || '5000', 10),
     nodeEnv: process.env.NODE_ENV || 'development',
