@@ -2,6 +2,8 @@
 // Model: all-MiniLM-L6-v2 (384-dim, ~25MB, downloads once on first run)
 // Zero API key required — fully offline after first download
 
+import os from 'os';
+import path from 'path';
 import { AI_CONFIG } from '../config/ai.config';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,8 +28,8 @@ async function getEmbeddingPipeline() {
     // Dynamic import to avoid top-level ESM issues
     const { pipeline: createPipeline, env } = await import('@xenova/transformers');
 
-    // Cache model in project directory
-    env.cacheDir = './.model_cache';
+    // Use OS temp directory for model cache to support read-only filesystems & cloud containers
+    env.cacheDir = path.join(os.tmpdir(), 'model_cache');
     env.allowRemoteModels = true;
 
     pipeline = await createPipeline('feature-extraction', AI_CONFIG.embeddingModel);
@@ -36,6 +38,7 @@ async function getEmbeddingPipeline() {
     return pipeline;
   } catch (err) {
     isLoading = false;
+    console.error('[Embedding] Failed to load embedding model:', err);
     throw err;
   }
 }

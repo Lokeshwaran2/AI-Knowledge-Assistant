@@ -31,9 +31,9 @@ export async function ingestDocument(
       return;
     }
 
-    // Step 3 — Generate embeddings in batch (sub-batched safely to prevent OOM)
-    const embeddings = await generateEmbeddingsBatch(chunks, 32, (processed, total) => {
-      if (processed % 160 === 0 || processed === total) {
+    // Step 3 — Generate embeddings in batch (sub-batched safely with batchSize=8 to prevent OOM spikes)
+    const embeddings = await generateEmbeddingsBatch(chunks, 8, (processed, total) => {
+      if (processed % 40 === 0 || processed === total) {
         console.log(`[Ingestion] Embedding progress: ${processed}/${total} chunks (${Math.round((processed / total) * 100)}%)`);
       }
     });
@@ -66,10 +66,19 @@ async function extractText(fileBuffer: Buffer, filename: string): Promise<string
   const ext = path.extname(filename).toLowerCase();
 
   if (ext === '.pdf') {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const pdfParse = require('pdf-parse');
-    const data = await pdfParse(fileBuffer);
-    return data.text;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pdfParse = require('pdf-parse');
+      const data = await pdfParse(fileBuffer);
+      if (!data || typeof data.text !== 'string' || !data.text.trim()) {
+        throw new Error('PDF file contains no readable text or is image-only/scanned.');
+      }
+      return data.text;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to parse PDF file.';
+      console.error('[Ingestion] PDF parse error:', msg);
+      throw new Error(`PDF processing error: ${msg}`);
+    }
   }
 
   if (ext === '.txt' || ext === '.md') {
