@@ -37,6 +37,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const clearError = useCallback(() => setError(null), []);
 
   const fetchConversations = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
     try {
       const { data } = await api.get('/chat/conversations');
       setConversations(data.conversations || []);
@@ -46,7 +48,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   React.useEffect(() => {
-    fetchConversations();
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetchConversations();
+    }
   }, [fetchConversations]);
 
   const loadConversation = useCallback(async (id: string) => {
