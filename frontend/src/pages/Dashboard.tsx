@@ -58,6 +58,8 @@ export default function Dashboard() {
   }, [documents]);
 
   const fetchDocuments = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
     try {
       const { data } = await api.get('/documents');
       setDocuments(data.documents || []);
