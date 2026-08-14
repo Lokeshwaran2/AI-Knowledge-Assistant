@@ -151,29 +151,7 @@ export async function generateEmbeddingsBatch(
 
   console.warn('[Embedding] Remote API unavailable/rate-limited, falling back to local ONNX model...');
 
-  // Step 2: Local ONNX Fallback (Small batch size=4 with event loop yields to protect RAM)
-  const pipe = await getLocalEmbeddingPipeline();
-  const dim = AI_CONFIG.embeddingDimension;
-  const allEmbeddings: number[][] = [];
-
-  for (let i = 0; i < texts.length; i += batchSize) {
-    const chunkBatch = texts.slice(i, i + batchSize);
-    const output = await pipe(chunkBatch, { pooling: 'mean', normalize: true });
-
-    for (let j = 0; j < chunkBatch.length; j++) {
-      allEmbeddings.push(Array.from(output.data.slice(j * dim, (j + 1) * dim) as Float32Array));
-    }
-
-    if (success && allRemoteEmbeddings.length === texts.length) {
-      console.log(`[Embedding] Successfully generated ${texts.length} remote embeddings (0 MB RAM used).`);
-      return allRemoteEmbeddings;
-    }
-
-    // Yield to Node event loop between batches to let V8 garbage collect ONNX tensors
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-
-  // 2. Local ONNX Engine Fallback
+  // Step 2: Local ONNX Engine Fallback (Small batch size=4 with event loop yields to protect RAM)
   try {
     const pipe = await getLocalEmbeddingPipeline();
     const dim = AI_CONFIG.embeddingDimension;
@@ -190,6 +168,9 @@ export async function generateEmbeddingsBatch(
       if (onProgress) {
         onProgress(allEmbeddings.length, texts.length);
       }
+
+      // Yield to Node event loop between batches to let V8 garbage collect ONNX tensors
+      await new Promise((resolve) => setTimeout(resolve, 20));
     }
 
     return allEmbeddings;
