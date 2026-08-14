@@ -1,4 +1,4 @@
-// Embedding Service — Production Dual-Engine (Remote API + Local ONNX Fallback)
+// Embedding Service — Production Remote API with Rate Limit Retries & OOM Protection
 // Model: sentence-transformers/all-MiniLM-L6-v2 (384-dim)
 // Uses Remote API in production for ZERO RAM overhead (prevents 512MB RAM server OOM crashes)
 
@@ -13,19 +13,20 @@ let isLoading = false;
 // ─── Engine 1: Remote Inference API (0 MB Server RAM) ─────────────────────────
 
 async function generateRemoteEmbeddings(texts: string[]): Promise<number[][] | null> {
-  try {
-    const hfToken = process.env.HF_TOKEN;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (hfToken) {
-      headers['Authorization'] = `Bearer ${hfToken}`;
-    }
+  const hfToken = process.env.HF_TOKEN;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (hfToken) {
+    headers['Authorization'] = `Bearer ${hfToken}`;
+  }
 
-    const endpoints = [
-      'https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2',
-      'https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2',
-    ];
+  const endpoints = [
+    'https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2',
+    'https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2',
+  ];
 
-    for (const url of endpoints) {
+  for (const url of endpoints) {
+    // Retry up to 3 times per endpoint for 503 (model loading) or 429 (rate limit)
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const response = await fetch(url, {
           method: 'POST',
@@ -36,21 +37,28 @@ async function generateRemoteEmbeddings(texts: string[]): Promise<number[][] | n
           }),
         });
 
-        if (!response.ok) continue;
+        if (response.status === 503 || response.status === 429) {
+          console.warn(`[Embedding] Remote API status ${response.status}. Retrying attempt ${attempt + 1}/3 in ${1.5 * (attempt + 1)}s...`);
+          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+          continue;
+        }
+
+        if (!response.ok) {
+          break;
+        }
 
         const data = await response.json();
         const parsed = parseHfResponse(data, texts.length);
         if (parsed && parsed.length === texts.length) {
           return parsed;
         }
-      } catch {
-        continue;
+      } catch (err) {
+        console.warn(`[Embedding] Remote API fetch error (attempt ${attempt + 1}):`, err);
+        await new Promise((r) => setTimeout(r, 1000));
       }
     }
-    return null;
-  } catch {
-    return null;
   }
+  return null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -81,7 +89,7 @@ function parseHfResponse(data: any, expectedCount: number): number[][] | null {
   return null;
 }
 
-// ─── Engine 2: Local ONNX Engine (Fallback) ───────────────────────────────────
+// ─── Engine 2: Local ONNX Engine (Local Dev Only) ─────────────────────────────
 
 async function getLocalEmbeddingPipeline() {
   if (pipeline) return pipeline;
@@ -126,10 +134,10 @@ export async function generateEmbeddingsBatch(
 ): Promise<number[][]> {
   if (texts.length === 0) return [];
 
-  // Step 1: Try Remote API (Uses 0 MB server RAM — prevents Render free tier OOM crashes)
-  console.log(`[Embedding] Attempting remote API embeddings for ${texts.length} chunks...`);
+  // Step 1: Remote API Engine (0 MB Server RAM)
+  console.log(`[Embedding] Generating remote API embeddings for ${texts.length} chunks...`);
   const allRemoteEmbeddings: number[][] = [];
-  const apiBatchSize = 16;
+  const apiBatchSize = 4; // Small payload per request to fit Hugging Face free tier limits
   let remoteSuccess = true;
 
   for (let i = 0; i < texts.length; i += apiBatchSize) {
@@ -142,6 +150,8 @@ export async function generateEmbeddingsBatch(
       remoteSuccess = false;
       break;
     }
+    // Pause 250ms between API calls to prevent 429 rate limiting on large documents
+    await new Promise((r) => setTimeout(r, 250));
   }
 
   if (remoteSuccess && allRemoteEmbeddings.length === texts.length) {
@@ -149,9 +159,15 @@ export async function generateEmbeddingsBatch(
     return allRemoteEmbeddings;
   }
 
-  console.warn('[Embedding] Remote API unavailable/rate-limited, falling back to local ONNX model...');
+  // Guard against OOM server crash in Production:
+  // Do NOT load local ONNX model in Production because ONNX WASM allocation exceeds 512MB RAM limit.
+  if (process.env.NODE_ENV === 'production') {
+    console.error('[Embedding] Remote API rate-limited or unavailable. Skipping local ONNX to prevent 512MB RAM OOM server crash.');
+    throw new Error('Embedding API rate-limited. Please wait a moment and try uploading again.');
+  }
 
-  // Step 2: Local ONNX Engine Fallback (Small batch size=4 with event loop yields to protect RAM)
+  // Step 2: Local ONNX Engine Fallback (Development Mode Only)
+  console.warn('[Embedding] Remote API unavailable, falling back to local ONNX model in dev mode...');
   try {
     const pipe = await getLocalEmbeddingPipeline();
     const dim = AI_CONFIG.embeddingDimension;
@@ -169,7 +185,6 @@ export async function generateEmbeddingsBatch(
         onProgress(allEmbeddings.length, texts.length);
       }
 
-      // Yield to Node event loop between batches to let V8 garbage collect ONNX tensors
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
 
