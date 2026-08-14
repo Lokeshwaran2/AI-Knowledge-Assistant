@@ -23,7 +23,6 @@ export default function Dashboard() {
   const [uploadMessage, setUploadMessage] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const wasProcessingRef = useRef(false);
-  const isFetchingRef = useRef(false);
 
   // Modal wizard state for document deletion
   const [deleteTarget, setDeleteTarget] = useState<{
@@ -45,7 +44,7 @@ export default function Dashboard() {
       wasProcessingRef.current = true;
       const interval = setInterval(() => {
         fetchDocuments();
-      }, 5000);
+      }, 2000);
 
       return () => clearInterval(interval);
     } else if (wasProcessingRef.current) {
@@ -60,15 +59,12 @@ export default function Dashboard() {
 
   const fetchDocuments = async () => {
     const token = localStorage.getItem('token');
-    if (!token || isFetchingRef.current) return;
-    isFetchingRef.current = true;
+    if (!token) return;
     try {
       const { data } = await api.get('/documents');
       setDocuments(data.documents || []);
     } catch {
       // silent fail
-    } finally {
-      isFetchingRef.current = false;
     }
   };
 
