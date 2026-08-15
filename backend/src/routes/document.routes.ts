@@ -4,6 +4,7 @@ import {
   listDocuments,
   deleteDocument,
   bulkDeleteDocuments,
+  streamDocumentEvents,
 } from '../controllers/document.controller';
 import { verifyJWT } from '../middleware/auth.middleware';
 
@@ -11,6 +12,9 @@ const router = Router();
 
 // All document routes require authentication
 router.use(verifyJWT);
+
+// GET /documents/events — Server-Sent Events (SSE) progress stream
+router.get('/events', streamDocumentEvents);
 
 // POST /documents — upload and trigger ingestion
 router.post('/', uploadDocument);
