@@ -27,6 +27,9 @@ const upload = multer({
   },
 });
 
+import { enqueueIngestionJob } from '../services/queue.service';
+import { sseService } from '../services/sse.service';
+
 // ─── Upload Document ─────────────────────────────────────────────────────────
 
 export const uploadDocument = [
@@ -44,6 +47,19 @@ export const uploadDocument = [
 
     const { originalname, buffer, size } = req.file;
 
+    // Magic Byte file signature validation for PDF files
+    const ext = path.extname(originalname).toLowerCase();
+    if (ext === '.pdf') {
+      const isPdfHeader = buffer.length >= 4 && buffer.toString('utf-8', 0, 5).startsWith('%PDF-');
+      if (!isPdfHeader) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid file content. Uploaded file extension is .pdf but binary content does not match PDF magic bytes.',
+        });
+        return;
+      }
+    }
+
     // Clean up any previously failed document entry with the same filename for this user
     await pool.query(
       `DELETE FROM documents WHERE user_id = $1 AND original_filename = $2 AND status = 'failed'`,
@@ -59,19 +75,32 @@ export const uploadDocument = [
       [documentId, req.user.userId, originalname, originalname, size]
     );
 
-    // Fire-and-forget — async ingestion pipeline using in-memory buffer
-    ingestDocument(documentId, req.user.userId, buffer, originalname).catch((err) => {
-      console.error('[Document] Background ingestion error:', err);
+    // Enqueue job to BullMQ Queue (or async fallback)
+    await enqueueIngestionJob({
+      documentId,
+      userId: req.user.userId,
+      fileBufferBase64: buffer.toString('base64'),
+      originalFilename: originalname,
     });
 
     res.status(202).json({
       success: true,
       status: 'processing',
       documentId,
-      message: 'Document received. Ingestion is running in the background.',
+      message: 'Document received. Ingestion job enqueued for background processing.',
     });
   }),
 ];
+
+// ─── Stream Document Real-Time Progress Events (SSE) ────────────────────────
+
+export const streamDocumentEvents = (req: Request, res: Response): void => {
+  if (!req.user) {
+    res.status(401).json({ success: false, message: 'Unauthorized.' });
+    return;
+  }
+  sseService.registerConnection(req.user.userId, res);
+};
 
 // ─── List Documents ───────────────────────────────────────────────────────────
 

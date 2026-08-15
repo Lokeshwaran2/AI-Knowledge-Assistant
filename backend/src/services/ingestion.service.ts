@@ -1,11 +1,12 @@
 // Ingestion Service — orchestrates the full document ingestion pipeline
-// Flow: Extract Text (RAM) → Chunk → Embed → Store in pgvector (Neon Cloud) → Update DB status
+// Flow: Extract Text (RAM) → Chunk → Embed → Store in pgvector (Neon Cloud) → Update DB status + Emit SSE Progress
 
 import path from 'path';
 import { pool } from '../db/connection';
 import { chunkText } from './chunking.service';
 import { generateEmbeddingsBatch } from './embedding.service';
 import { storeChunks, ChunkMetadata } from './vectordb.service';
+import { sseService } from './sse.service';
 
 // ─── Main Ingestion Function ──────────────────────────────────────────────────
 
@@ -18,28 +19,72 @@ export async function ingestDocument(
   console.log(`[Ingestion] Starting for document ${documentId}`);
 
   try {
-    // Step 1 — Extract text from Buffer in RAM
+    // Stage 1: Extraction
+    sseService.emitProgress(userId, {
+      documentId,
+      status: 'processing',
+      stage: 'extraction',
+      progress: 10,
+      message: 'Extracting document text...',
+    });
+
     const rawText = await extractText(fileBuffer, originalFilename);
     console.log(`[Ingestion] Extracted ${rawText.length} characters`);
 
-    // Step 2 — Chunk the text
+    // Stage 2: Chunking
+    sseService.emitProgress(userId, {
+      documentId,
+      status: 'processing',
+      stage: 'chunking',
+      progress: 30,
+      message: `Extracted ${rawText.length} characters. Splitting into text chunks...`,
+    });
+
     const chunks = chunkText(rawText);
     console.log(`[Ingestion] Created ${chunks.length} chunks`);
 
     if (chunks.length === 0) {
       await updateDocumentStatus(documentId, 'failed', 0);
+      sseService.emitProgress(userId, {
+        documentId,
+        status: 'failed',
+        stage: 'failed',
+        progress: 100,
+        message: 'No readable text content found in document.',
+      });
       return;
     }
 
-    // Step 3 — Generate embeddings in batch (sub-batched safely with batchSize=8 to prevent OOM spikes)
-    const embeddings = await generateEmbeddingsBatch(chunks, 8, (processed, total) => {
-      if (processed % 40 === 0 || processed === total) {
-        console.log(`[Ingestion] Embedding progress: ${processed}/${total} chunks (${Math.round((processed / total) * 100)}%)`);
-      }
+    // Stage 3: Embedding Generation
+    sseService.emitProgress(userId, {
+      documentId,
+      status: 'processing',
+      stage: 'embedding',
+      progress: 40,
+      message: `Created ${chunks.length} chunks. Generating vector embeddings...`,
+    });
+
+    const embeddings = await generateEmbeddingsBatch(chunks, 4, (processed, total) => {
+      const pct = Math.round(40 + (processed / total) * 40); // 40% to 80% range
+      sseService.emitProgress(userId, {
+        documentId,
+        status: 'processing',
+        stage: 'embedding',
+        progress: pct,
+        message: `Generated embeddings for ${processed}/${total} chunks (${Math.round((processed / total) * 100)}%)...`,
+      });
     });
     console.log(`[Ingestion] Generated ${embeddings.length} embeddings`);
 
-    // Step 4 — Build metadata for each chunk
+    // Stage 4: Vector Storage
+    sseService.emitProgress(userId, {
+      documentId,
+      status: 'processing',
+      stage: 'storing',
+      progress: 85,
+      message: 'Storing vector embeddings in pgvector database...',
+    });
+
     const metadata: ChunkMetadata[] = chunks.map((doc, i) => ({
       documentId,
       userId,
@@ -47,16 +92,33 @@ export async function ingestDocument(
       source: originalFilename,
     }));
 
-    // Step 5 — Store in pgvector (Neon PostgreSQL Cloud)
     await storeChunks(chunks, embeddings, metadata);
 
-    // Step 6 — Update document status to ready
+    // Stage 5: Completion
     await updateDocumentStatus(documentId, 'ready', chunks.length);
 
+    sseService.emitProgress(userId, {
+      documentId,
+      status: 'ready',
+      stage: 'completed',
+      progress: 100,
+      message: 'Document ingestion complete! Ready for search and chat.',
+      chunkCount: chunks.length,
+    });
+
     console.log(`[Ingestion] Document ${documentId} ready.`);
-  } catch (err) {
-    console.error(`[Ingestion] Failed for document ${documentId}:`, err);
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : 'Unknown error during ingestion.';
+    console.error(`[Ingestion] Failed for document ${documentId}:`, errMsg);
     await updateDocumentStatus(documentId, 'failed', 0);
+
+    sseService.emitProgress(userId, {
+      documentId,
+      status: 'failed',
+      stage: 'failed',
+      progress: 100,
+      message: `Ingestion failed: ${errMsg}`,
+    });
   }
 }
 
@@ -100,4 +162,3 @@ async function updateDocumentStatus(
     [status, chunkCount, documentId]
   );
 }
-

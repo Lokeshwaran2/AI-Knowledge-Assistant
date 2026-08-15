@@ -21,7 +21,7 @@ async function generateRemoteEmbeddings(texts: string[]): Promise<number[][] | n
 
   const endpoints = [
     'https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2',
-    'https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2',
+    'https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2',
   ];
 
   for (const url of endpoints) {
@@ -38,8 +38,8 @@ async function generateRemoteEmbeddings(texts: string[]): Promise<number[][] | n
         });
 
         if (response.status === 503 || response.status === 429) {
-          console.warn(`[Embedding] Remote API status ${response.status}. Retrying attempt ${attempt + 1}/3 in ${1.5 * (attempt + 1)}s...`);
-          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+          console.warn(`[Embedding] Remote API status ${response.status}. Retrying attempt ${attempt + 1}/3...`);
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
           continue;
         }
 
@@ -52,9 +52,15 @@ async function generateRemoteEmbeddings(texts: string[]): Promise<number[][] | n
         if (parsed && parsed.length === texts.length) {
           return parsed;
         }
-      } catch (err) {
-        console.warn(`[Embedding] Remote API fetch error (attempt ${attempt + 1}):`, err);
-        await new Promise((r) => setTimeout(r, 1000));
+      } catch (err: unknown) {
+        const errObj = err as { cause?: { code?: string }; message?: string };
+        const code = errObj?.cause?.code;
+        if (code === 'ENOTFOUND' || code === 'ECONNREFUSED' || code === 'ETIMEDOUT') {
+          console.warn(`[Embedding] Remote Hugging Face API host unreachable (${code || 'Network Error'}).`);
+          return null; // Instant fallback without retrying unreachable hosts
+        }
+        console.warn(`[Embedding] Remote API fetch error (attempt ${attempt + 1}):`, errObj.message || err);
+        await new Promise((r) => setTimeout(r, 500));
       }
     }
   }
