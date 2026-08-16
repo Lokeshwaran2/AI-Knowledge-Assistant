@@ -96,15 +96,21 @@ export async function ingestDocument(
       message: 'Storing vector embeddings in pgvector database...',
     });
 
+    const prepStart = Date.now();
     const metadata: ChunkMetadata[] = chunks.map((doc, i) => ({
       documentId,
       userId,
       chunkIndex: i,
       source: originalFilename,
     }));
+    const prepDurationMs = Date.now() - prepStart;
 
+    const dbInsertStart = Date.now();
     await storeChunks(chunks, embeddings, metadata);
+    const dbInsertDurationMs = Date.now() - dbInsertStart;
     const dbDurationSec = (Date.now() - t3) / 1000;
+
+    console.log(`[Telemetry] DB Prep: ${prepDurationMs}ms | DB Bulk SQL Execution: ${dbInsertDurationMs}ms (${dbDurationSec.toFixed(3)}s total DB stage)`);
 
     // ── STAGE 5: Completion & Summary Printing ──────────────────────────────
     const totalDurationSec = (Date.now() - totalStartTime) / 1000;

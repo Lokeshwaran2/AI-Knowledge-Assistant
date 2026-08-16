@@ -52,28 +52,39 @@ export async function storeChunks(
   try {
     await client.query('BEGIN');
 
-    // Batch insert into document_chunks
-    const batchSize = 100;
-    for (let i = 0; i < chunks.length; i += batchSize) {
-      const chunkBatch = chunks.slice(i, i + batchSize);
-      const embedBatch = embeddings.slice(i, i + batchSize);
-      const metaBatch = metadata.slice(i, i + batchSize);
+    // Multi-row bulk insertion in batches of 100 rows per single SQL query
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+      const chunkBatch = chunks.slice(i, i + BATCH_SIZE);
+      const embedBatch = embeddings.slice(i, i + BATCH_SIZE);
+      const metaBatch = metadata.slice(i, i + BATCH_SIZE);
+
+      const valueRows: string[] = [];
+      const queryParams: unknown[] = [];
+      let paramIdx = 1;
 
       for (let j = 0; j < chunkBatch.length; j++) {
         const text = chunkBatch[j];
         const embeddingStr = `[${embedBatch[j].join(',')}]`;
         const meta = metaBatch[j];
 
-        await client.query(
-          `INSERT INTO document_chunks (document_id, user_id, chunk_index, chunk_text, embedding, source)
-           VALUES ($1, $2, $3, $4, $5::vector, $6)`,
-          [meta.documentId, meta.userId, meta.chunkIndex, text, embeddingStr, meta.source]
+        valueRows.push(
+          `($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}::vector, $${paramIdx + 5})`
         );
+        queryParams.push(meta.documentId, meta.userId, meta.chunkIndex, text, embeddingStr, meta.source);
+        paramIdx += 6;
       }
+
+      const bulkQuery = `
+        INSERT INTO document_chunks (document_id, user_id, chunk_index, chunk_text, embedding, source)
+        VALUES ${valueRows.join(', ')}
+      `;
+
+      await client.query(bulkQuery, queryParams);
     }
 
     await client.query('COMMIT');
-    console.log(`[pgvector] Stored ${chunks.length} vector chunks in Neon PostgreSQL`);
+    console.log(`[pgvector] Stored ${chunks.length} vector chunks in Neon PostgreSQL via bulk insert`);
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[pgvector] Failed to store vector chunks:', err);

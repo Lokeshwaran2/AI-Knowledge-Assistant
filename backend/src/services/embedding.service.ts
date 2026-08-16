@@ -143,7 +143,7 @@ export async function generateEmbeddingsBatch(
   // Step 1: Remote API Engine (0 MB Server RAM)
   console.log(`[Embedding] Generating remote API embeddings for ${texts.length} chunks...`);
   const allRemoteEmbeddings: number[][] = [];
-  const apiBatchSize = 4; // Small payload per request to fit Hugging Face free tier limits
+  const apiBatchSize = 32; // Optimized payload per request for Hugging Face Inference API
   let remoteSuccess = true;
 
   for (let i = 0; i < texts.length; i += apiBatchSize) {
@@ -156,8 +156,10 @@ export async function generateEmbeddingsBatch(
       remoteSuccess = false;
       break;
     }
-    // Pause 250ms between API calls to prevent 429 rate limiting on large documents
-    await new Promise((r) => setTimeout(r, 250));
+    // Minimal 50ms pause between larger API batches
+    if (i + apiBatchSize < texts.length) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
   }
 
   if (remoteSuccess && allRemoteEmbeddings.length === texts.length) {

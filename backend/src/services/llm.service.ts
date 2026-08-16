@@ -79,3 +79,72 @@ export async function generateLLMResponse(prompt: string): Promise<LLMResult> {
     throw new AppError('Unable to generate a response. Please try again.', 502);
   }
 }
+
+export interface StreamChunk {
+  delta: string;
+}
+
+export async function* generateLLMResponseStream(
+  prompt: string,
+  abortSignal?: AbortSignal,
+  streamId: string = 'local-stream'
+): AsyncGenerator<string, LLMResult, void> {
+  const client = getGroqClient();
+  const startTime = Date.now();
+  let fullText = '';
+  let estimatedTokens = 0;
+  let chunkCount = 0;
+
+  console.log(`[STREAM ${streamId}] LLM_STREAM_START t=0ms`);
+
+  try {
+    const stream = await client.chat.completions.create(
+      {
+        model: AI_CONFIG.model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: AI_CONFIG.temperature,
+        max_tokens: AI_CONFIG.maxTokens,
+        stream: true,
+      },
+      { signal: abortSignal }
+    );
+
+    for await (const chunk of stream) {
+      if (abortSignal?.aborted) {
+        break;
+      }
+
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        chunkCount++;
+        const elapsed = Date.now() - startTime;
+        console.log(`[STREAM ${streamId}] LLM_CHUNK_RECEIVED #${chunkCount} t=${elapsed}ms size=${content.length}`);
+        fullText += content;
+        estimatedTokens += 1;
+        yield content;
+      }
+    }
+
+    const latencyMs = Date.now() - startTime;
+    console.log(`[STREAM ${streamId}] LLM_STREAM_END t=${latencyMs}ms totalChunks=${chunkCount}`);
+    return {
+      answer: fullText.trim(),
+      tokensUsed: estimatedTokens,
+      latencyMs,
+      model: AI_CONFIG.model,
+    };
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      const latencyMs = Date.now() - startTime;
+      console.log(`[LLM] Streaming request aborted by client after ${latencyMs}ms`);
+      return {
+        answer: fullText.trim(),
+        tokensUsed: estimatedTokens,
+        latencyMs,
+        model: AI_CONFIG.model,
+      };
+    }
+    console.error('[LLM] Streaming error:', err);
+    throw new AppError('Unable to generate a response stream. Please try again.', 502);
+  }
+}
