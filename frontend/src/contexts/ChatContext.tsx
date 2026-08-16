@@ -1,11 +1,11 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
 import api from '../services/api';
+import { postSSE } from '../services/streamService';
 
 import type { Message, Conversation } from '../types/chat.types';
 
 // Re-export for backwards compatibility
 export type { Message, Conversation };
-
 
 interface ChatContextType {
   messages: Message[];
@@ -14,6 +14,7 @@ interface ChatContextType {
   isSending: boolean;
   error: string | null;
   sendMessage: (content: string) => Promise<void>;
+  stopGenerating: () => void;
   loadConversation: (id: string) => Promise<void>;
   startNewConversation: () => void;
   deleteConversation: (id: string) => Promise<void>;
@@ -34,7 +35,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   const clearError = useCallback(() => setError(null), []);
+
+  const stopGenerating = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsSending(false);
+    }
+  }, []);
 
   const fetchConversations = useCallback(async () => {
     const token = localStorage.getItem('token');
@@ -95,70 +106,148 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     [activeConversationId]
   );
 
-  const sendMessage = useCallback(async (content: string) => {
-    if (!content.trim() || isSending) return;
+  const sendMessage = useCallback(
+    async (content: string) => {
+      if (!content.trim() || isSending) return;
 
-    const userMessageId = `user-${Date.now()}`;
-    const loadingMessageId = `loading-${Date.now()}`;
+      const userMessageId = `user-${Date.now()}`;
+      const loadingMessageId = `assistant-loading-${Date.now()}`;
 
-    // Immediately add user message and loading indicator
-    setMessages((prev) => [
-      ...prev,
-      { id: userMessageId, role: 'user', content },
-      { id: loadingMessageId, role: 'assistant', content: '', isLoading: true },
-    ]);
+      // Immediately add user message and assistant placeholder
+      setMessages((prev) => [
+        ...prev,
+        { id: userMessageId, role: 'user', content },
+        { id: loadingMessageId, role: 'assistant', content: '', isLoading: true },
+      ]);
 
-    setIsSending(true);
-    setError(null);
+      setIsSending(true);
+      setError(null);
 
-    try {
-      const { data } = await api.post('/chat', {
-        message: content,
-        conversationId: activeConversationId,
-      });
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
-      // Update active conversation
-      if (data.conversationId && !activeConversationId) {
-        setActiveConversationId(data.conversationId);
-      }
+      // Progressive token buffer & animation frame loop for smooth 60fps UI rendering
+      let pendingBuffer = '';
+      let isStreamingDone = false;
+      let frameId: number | null = null;
 
-      // Replace loading message with real response
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === loadingMessageId
-            ? {
-                id: `assistant-${Date.now()}`,
-                role: 'assistant' as const,
-                content: data.message,
-                tokensUsed: data.tokensUsed,
-                latencyMs: data.latencyMs,
-                chunksRetrieved: data.chunksRetrieved,
-                isLoading: false,
+      const flushBufferLoop = () => {
+        if (pendingBuffer.length > 0) {
+          // Flush 1-4 characters per 16.6ms frame tick for smooth visual typing
+          const chunkSize = Math.max(1, Math.min(4, Math.ceil(pendingBuffer.length / 3)));
+          const chunk = pendingBuffer.slice(0, chunkSize);
+          pendingBuffer = pendingBuffer.slice(chunkSize);
+
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === loadingMessageId
+                ? {
+                    ...msg,
+                    content: msg.content + chunk,
+                    isLoading: false, // Hide spinner as soon as first token paints
+                  }
+                : msg
+            )
+          );
+        }
+
+        if (!isStreamingDone || pendingBuffer.length > 0) {
+          frameId = requestAnimationFrame(flushBufferLoop);
+        }
+      };
+
+      frameId = requestAnimationFrame(flushBufferLoop);
+
+      try {
+        await postSSE(
+          '/chat/stream',
+          {
+            message: content,
+            conversationId: activeConversationId,
+          },
+          (evt) => {
+            if (evt.event === 'start') {
+              if (evt.data.conversationId && !activeConversationId) {
+                setActiveConversationId(evt.data.conversationId);
               }
-            : msg
-        )
-      );
+            } else if (evt.event === 'token') {
+              const delta = evt.data.delta || '';
+              pendingBuffer += delta;
+            } else if (evt.event === 'done') {
+              isStreamingDone = true;
+              // Flush any remaining text in buffer immediately
+              if (pendingBuffer.length > 0) {
+                const remaining = pendingBuffer;
+                pendingBuffer = '';
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === loadingMessageId
+                      ? { ...msg, content: msg.content + remaining, isLoading: false }
+                      : msg
+                  )
+                );
+              }
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === loadingMessageId
+                    ? {
+                        ...msg,
+                        id: `assistant-${Date.now()}`,
+                        isLoading: false,
+                        tokensUsed: evt.data.tokensUsed,
+                        latencyMs: evt.data.latencyMs,
+                        chunksRetrieved: evt.data.chunksRetrieved,
+                      }
+                    : msg
+                )
+              );
+              fetchConversations();
+            } else if (evt.event === 'error') {
+              isStreamingDone = true;
+              const errMsg = evt.data.message || 'Stream error occurred.';
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === loadingMessageId
+                    ? { ...m, content: errMsg, isLoading: false, isError: true }
+                    : m
+                )
+              );
+              setError(errMsg);
+            }
+          },
+          controller.signal
+        );
+      } catch (err: unknown) {
+        isStreamingDone = true;
+        if (frameId) cancelAnimationFrame(frameId);
+        if (err instanceof Error && err.name === 'AbortError') {
+          console.log('[Chat] Generation stopped by user.');
+          setMessages((prev) =>
+            prev.map((m) => (m.id === loadingMessageId ? { ...m, isLoading: false } : m))
+          );
+          return;
+        }
 
-      // Refresh conversation list
-      fetchConversations();
-    } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
-        'Unable to get a response. Please try again.';
+        const msg =
+          (err as { message?: string })?.message ||
+          'Unable to get a response. Please try again.';
 
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === loadingMessageId
-            ? { ...m, content: msg, isLoading: false, isError: true }
-            : m
-        )
-      );
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === loadingMessageId
+              ? { ...m, content: msg, isLoading: false, isError: true }
+              : m
+          )
+        );
 
-      setError(msg);
-    } finally {
-      setIsSending(false);
-    }
-  }, [activeConversationId, isSending, fetchConversations]);
+        setError(msg);
+      } finally {
+        setIsSending(false);
+        abortControllerRef.current = null;
+      }
+    },
+    [activeConversationId, isSending, fetchConversations]
+  );
 
   return (
     <ChatContext.Provider
@@ -169,6 +258,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         isSending,
         error,
         sendMessage,
+        stopGenerating,
         loadConversation,
         startNewConversation,
         deleteConversation,
