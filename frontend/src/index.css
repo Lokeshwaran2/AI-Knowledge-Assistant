@@ -1042,3 +1042,17 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   opacity: 0.7;
 }
 .error-close:hover { opacity: 1; }
+
+/* Real-Time Streaming Cursor */
+.streaming-cursor {
+  display: inline-block;
+  margin-left: 3px;
+  color: var(--accent);
+  font-weight: bold;
+  animation: cursorBlink 0.7s infinite alternate;
+}
+
+@keyframes cursorBlink {
+  0% { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 0.15; transform: scale(0.9); }
+}

@@ -6,15 +6,28 @@ interface Props {
 
 export default function MessageBubble({ message }: Props) {
   const isUser = message.role === 'user';
+  const isThinking = !isUser && message.isLoading && !message.content;
+  const isStreaming = !isUser && (message.isStreaming || message.isLoading) && message.content.length > 0;
 
   return (
     <div className={`message-bubble-wrapper ${isUser ? 'user' : 'assistant'}`}>
       <div className="avatar">{isUser ? '👤' : '🤖'}</div>
       <div className={`bubble ${message.isError ? 'error' : ''}`}>
-        <p className="bubble-content">{message.content}</p>
+        {isThinking ? (
+          <div className="typing-indicator" title="Searching knowledge base & generating stream...">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        ) : (
+          <p className="bubble-content">
+            {message.content}
+            {isStreaming && <span className="streaming-cursor">▌</span>}
+          </p>
+        )}
 
         {/* Metadata footer — observability signal */}
-        {!isUser && message.tokensUsed !== undefined && message.tokensUsed > 0 && (
+        {!isUser && !isStreaming && !isThinking && message.tokensUsed !== undefined && message.tokensUsed > 0 && (
           <div className="bubble-meta">
             <span title="Tokens used">⚡ {message.tokensUsed} tokens</span>
             {message.latencyMs !== undefined && (
