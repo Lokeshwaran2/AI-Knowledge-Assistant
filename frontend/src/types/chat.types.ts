@@ -9,6 +9,7 @@ export type Message = {
   latencyMs?: number;
   chunksRetrieved?: number;
   isLoading?: boolean;
+  isStreaming?: boolean;
   isError?: boolean;
 };
 
