@@ -2,7 +2,6 @@ import { useRef, useEffect } from 'react';
 import { useChat } from '../contexts/ChatContext';
 import type { Message } from '../types/chat.types';
 import MessageBubble from './MessageBubble';
-import Loader from './Loader';
 
 export default function MessageList() {
   const { messages } = useChat();
