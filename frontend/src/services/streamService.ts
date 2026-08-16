@@ -15,6 +15,7 @@ export async function postSSE(
 ): Promise<void> {
   const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
   const token = localStorage.getItem('token');
+  const fetchStart = Date.now();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -25,12 +26,16 @@ export async function postSSE(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  console.log(`[FRONTEND_STREAM] FRONTEND_REQUEST_START t=0ms url=${path}`);
+
   const response = await fetch(`${baseURL}${path}`, {
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
     signal,
   });
+
+  const streamId = response.headers.get('X-Stream-ID') || 'unknown';
 
   if (!response.ok) {
     let errorMsg = 'Failed to connect to streaming endpoint.';
@@ -40,6 +45,7 @@ export async function postSSE(
     } catch {
       // Ignore parse error
     }
+    console.error(`[STREAM ${streamId}] FRONTEND_CONNECT_ERROR status=${response.status} msg=${errorMsg}`);
     throw new Error(errorMsg);
   }
 
@@ -50,21 +56,20 @@ export async function postSSE(
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
-  const fetchStart = Date.now();
   let frontendChunkCount = 0;
 
-  console.log(`[STREAM_FRONTEND] CONNECTED t=0ms`);
+  console.log(`[STREAM ${streamId}] FRONTEND_STREAM_CONNECTED t=${Date.now() - fetchStart}ms`);
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) {
-      console.log(`[STREAM_FRONTEND] END t=${Date.now() - fetchStart}ms totalChunks=${frontendChunkCount}`);
+      console.log(`[STREAM ${streamId}] FRONTEND_STREAM_END t=${Date.now() - fetchStart}ms totalChunks=${frontendChunkCount}`);
       break;
     }
 
     frontendChunkCount++;
     const elapsed = Date.now() - fetchStart;
-    console.log(`[STREAM_FRONTEND] FRONTEND_CHUNK_RECEIVED #${frontendChunkCount} t=${elapsed}ms size=${value.length}bytes`);
+    console.log(`[STREAM ${streamId}] FRONTEND_CHUNK_RECEIVED #${frontendChunkCount} t=${elapsed}ms size=${value.length}bytes`);
 
     buffer += decoder.decode(value, { stream: true });
 
@@ -93,7 +98,7 @@ export async function postSSE(
           const parsedData = JSON.parse(currentData);
           onEvent({ event: currentEvent as SSEEvent['event'], data: parsedData });
         } catch (err) {
-          console.warn('[SSE] Failed to parse event JSON data:', currentData, err);
+          console.warn(`[STREAM ${streamId}] SSE JSON parse error:`, currentData, err);
         }
       }
     }

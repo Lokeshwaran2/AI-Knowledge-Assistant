@@ -119,6 +119,10 @@ export const handleDebugStreamLLM = async (req: Request, res: Response): Promise
 // ─── POST /chat/stream (SSE Real-Time Response Stream) ─────────────────────────
 
 export const handleChatStream = async (req: Request, res: Response): Promise<void> => {
+  const streamId = (req.id || 'stream-' + Date.now().toString(36)).slice(0, 12);
+  const streamStart = Date.now();
+  console.log(`[STREAM ${streamId}] STREAM_START t=0ms`);
+
   const { message, conversationId } = req.body;
 
   if (!message || typeof message !== 'string' || message.trim().length === 0) {
@@ -144,11 +148,12 @@ export const handleChatStream = async (req: Request, res: Response): Promise<voi
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('X-Stream-ID', streamId);
   if (typeof (res as unknown as { flushHeaders?: () => void }).flushHeaders === 'function') {
     (res as unknown as { flushHeaders: () => void }).flushHeaders();
   }
 
-  sendSSEEvent(res, 'start', { conversationId: convId });
+  sendSSEEvent(res, 'start', { conversationId: convId, streamId });
   sendSSEEvent(res, 'status', { stage: 'retrieving', message: 'Searching vector knowledge base...' });
 
   try {
@@ -156,10 +161,14 @@ export const handleChatStream = async (req: Request, res: Response): Promise<voi
     await storeMessage({ conversationId: convId, userId, role: 'user', content: message });
 
     // ── Step 2: Embed user question ───────────────────────────────────────────
+    const ragStart = Date.now() - streamStart;
+    console.log(`[STREAM ${streamId}] RAG_START t=${ragStart}ms`);
     await generateEmbedding(message);
 
     // ── Step 3: Retrieve relevant chunks ─────────────────────────────────────
     const chunks = await retrieveRelevantChunks(message, userId);
+    const ragEnd = Date.now() - streamStart;
+    console.log(`[STREAM ${streamId}] RAG_END t=${ragEnd}ms chunks=${chunks.length}`);
 
     // ── Step 4: Handle empty retrieval — deterministic refusal ───────────────
     if (chunks.length === 0) {
@@ -182,13 +191,13 @@ export const handleChatStream = async (req: Request, res: Response): Promise<voi
         latencyMs: 0,
         chunksRetrieved: 0,
         model: 'none',
+        streamId,
       });
+      console.log(`[STREAM ${streamId}] SSE_END t=${Date.now() - streamStart}ms (empty retrieval)`);
       res.end();
       return;
     }
 
-    const streamId = (req.id || 'stream-' + Date.now().toString(36)).slice(0, 12);
-    const streamStart = Date.now();
     const prompt = buildAnswerPrompt(message, chunks);
     sendSSEEvent(res, 'status', { stage: 'generating', message: 'Generating response stream...' });
 
@@ -196,11 +205,14 @@ export const handleChatStream = async (req: Request, res: Response): Promise<voi
     const abortController = new AbortController();
     req.on('close', () => {
       if (!res.writableEnded) {
+        console.log(`[STREAM ${streamId}] CLIENT_DISCONNECT detected, aborting stream`);
         abortController.abort();
       }
     });
 
     // ── Step 6: Stream LLM Tokens ─────────────────────────────────────────────
+    const llmStart = Date.now() - streamStart;
+    console.log(`[STREAM ${streamId}] LLM_START t=${llmStart}ms`);
     const streamGenerator = generateLLMResponseStream(prompt, abortController.signal, streamId);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let llmResult: any;
@@ -218,6 +230,9 @@ export const handleChatStream = async (req: Request, res: Response): Promise<voi
       const writeEnd = Date.now() - streamStart;
       console.log(`[STREAM ${streamId}] BACKEND_WRITE #${backendChunkCount} t=${writeStart}ms..${writeEnd}ms size=${value.length}`);
     }
+
+    const llmEnd = Date.now() - streamStart;
+    console.log(`[STREAM ${streamId}] LLM_END t=${llmEnd}ms totalBackendWrites=${backendChunkCount}`);
 
     // ── Step 7: Store assistant message ───────────────────────────────────────
     await storeMessage({
@@ -237,11 +252,14 @@ export const handleChatStream = async (req: Request, res: Response): Promise<voi
       latencyMs: llmResult.latencyMs,
       chunksRetrieved: chunks.length,
       model: llmResult.model,
+      streamId,
     });
+    console.log(`[STREAM ${streamId}] SSE_END t=${Date.now() - streamStart}ms`);
     res.end();
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : 'Error generating response.';
-    sendSSEEvent(res, 'error', { message: errMsg });
+    console.error(`[STREAM ${streamId}] ERROR t=${Date.now() - streamStart}ms:`, errMsg);
+    sendSSEEvent(res, 'error', { message: errMsg, streamId });
     res.end();
   }
 };

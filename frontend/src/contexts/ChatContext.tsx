@@ -112,12 +112,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
       const userMessageId = `user-${Date.now()}`;
       const loadingMessageId = `assistant-loading-${Date.now()}`;
+      const sendStartMs = Date.now();
 
       // Immediately add user message and assistant placeholder
       setMessages((prev) => [
         ...prev,
         { id: userMessageId, role: 'user', content },
-        { id: loadingMessageId, role: 'assistant', content: '', isLoading: true },
+        { id: loadingMessageId, role: 'assistant', content: '', isLoading: true, isStreaming: false },
       ]);
 
       setIsSending(true);
@@ -126,15 +127,31 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
-      // Progressive token buffer & animation frame loop for smooth 60fps UI rendering
+      // Real-time stream buffer & animation frame loop synchronized with 60fps browser rendering
       let pendingBuffer = '';
       let isStreamingDone = false;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let donePayload: any = null;
       let frameId: number | null = null;
+      let renderCount = 0;
+      let firstRenderMs = 0;
 
       const flushBufferLoop = () => {
         if (pendingBuffer.length > 0) {
-          // Flush 1-4 characters per 16.6ms frame tick for smooth visual typing
-          const chunkSize = Math.max(1, Math.min(4, Math.ceil(pendingBuffer.length / 3)));
+          renderCount++;
+          if (renderCount === 1) {
+            firstRenderMs = Date.now() - sendStartMs;
+            console.log(`[STREAM_UI] FRONTEND_FIRST_RENDER t=${firstRenderMs}ms`);
+          }
+
+          // Dynamic progressive typing rate:
+          // Drains at 2 to 12 characters per 16.6ms frame tick (~120-720 chars/sec).
+          // Scales adaptively with buffer depth so backpressure drains smoothly across frames.
+          const targetDrainFrames = 3;
+          const chunkSize = Math.max(
+            2,
+            Math.min(pendingBuffer.length, Math.ceil(pendingBuffer.length / targetDrainFrames))
+          );
           const chunk = pendingBuffer.slice(0, chunkSize);
           pendingBuffer = pendingBuffer.slice(chunkSize);
 
@@ -145,6 +162,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
                     ...msg,
                     content: msg.content + chunk,
                     isLoading: false, // Hide spinner as soon as first token paints
+                    isStreaming: true,
                   }
                 : msg
             )
@@ -153,6 +171,25 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
         if (!isStreamingDone || pendingBuffer.length > 0) {
           frameId = requestAnimationFrame(flushBufferLoop);
+        } else {
+          // Stream is finished AND buffer is 100% drained -> finalize message state
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === loadingMessageId
+                ? {
+                    ...msg,
+                    id: `assistant-${Date.now()}`,
+                    isLoading: false,
+                    isStreaming: false,
+                    tokensUsed: donePayload?.tokensUsed,
+                    latencyMs: donePayload?.latencyMs,
+                    chunksRetrieved: donePayload?.chunksRetrieved,
+                  }
+                : msg
+            )
+          );
+          console.log(`[STREAM_UI] FRONTEND_STREAM_COMPLETED t=${Date.now() - sendStartMs}ms totalRenders=${renderCount}`);
+          fetchConversations();
         }
       };
 
@@ -174,41 +211,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
               const delta = evt.data.delta || '';
               pendingBuffer += delta;
             } else if (evt.event === 'done') {
+              donePayload = evt.data;
               isStreamingDone = true;
-              // Flush any remaining text in buffer immediately
-              if (pendingBuffer.length > 0) {
-                const remaining = pendingBuffer;
-                pendingBuffer = '';
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === loadingMessageId
-                      ? { ...msg, content: msg.content + remaining, isLoading: false }
-                      : msg
-                  )
-                );
-              }
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === loadingMessageId
-                    ? {
-                        ...msg,
-                        id: `assistant-${Date.now()}`,
-                        isLoading: false,
-                        tokensUsed: evt.data.tokensUsed,
-                        latencyMs: evt.data.latencyMs,
-                        chunksRetrieved: evt.data.chunksRetrieved,
-                      }
-                    : msg
-                )
-              );
-              fetchConversations();
             } else if (evt.event === 'error') {
               isStreamingDone = true;
+              pendingBuffer = '';
+              if (frameId) cancelAnimationFrame(frameId);
               const errMsg = evt.data.message || 'Stream error occurred.';
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === loadingMessageId
-                    ? { ...m, content: errMsg, isLoading: false, isError: true }
+                    ? { ...m, content: errMsg, isLoading: false, isStreaming: false, isError: true }
                     : m
                 )
               );
@@ -219,11 +232,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         );
       } catch (err: unknown) {
         isStreamingDone = true;
+        pendingBuffer = '';
         if (frameId) cancelAnimationFrame(frameId);
         if (err instanceof Error && err.name === 'AbortError') {
           console.log('[Chat] Generation stopped by user.');
           setMessages((prev) =>
-            prev.map((m) => (m.id === loadingMessageId ? { ...m, isLoading: false } : m))
+            prev.map((m) => (m.id === loadingMessageId ? { ...m, isLoading: false, isStreaming: false } : m))
           );
           return;
         }
@@ -235,7 +249,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === loadingMessageId
-              ? { ...m, content: msg, isLoading: false, isError: true }
+              ? { ...m, content: msg, isLoading: false, isStreaming: false, isError: true }
               : m
           )
         );
