@@ -1,4 +1,14 @@
-import { useState, useEffect, useRef, type ChangeEvent } from 'react';
+import { useState, useEffect, useRef, type ChangeEvent, type DragEvent } from 'react';
+import {
+  UploadCloud,
+  CheckCircle2,
+  XCircle,
+  Trash2,
+  RotateCw,
+  Menu,
+  FilePlus,
+  Layers,
+} from 'lucide-react';
 import { useChat } from '../contexts/ChatContext';
 import Sidebar from '../components/Sidebar';
 import ConfirmModal from '../components/ConfirmModal';
@@ -22,6 +32,7 @@ export default function Dashboard() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
   const wasProcessingRef = useRef(false);
   const isFetchingRef = useRef(false);
 
@@ -104,10 +115,7 @@ export default function Dashboard() {
     }
   };
 
-  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const uploadFile = async (file: File) => {
     setIsUploading(true);
     setUploadMessage('Uploading document...');
 
@@ -131,6 +139,28 @@ export default function Dashboard() {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  };
+
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) uploadFile(file);
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingOver(true);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingOver(false);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) uploadFile(file);
   };
 
   const promptDeleteSingle = (id: string, name: string) => {
@@ -210,54 +240,81 @@ export default function Dashboard() {
               className="mobile-hamburger-btn"
               onClick={() => setMobileSidebarOpen(true)}
               title="Open Menu"
+              aria-label="Open Navigation Drawer"
             >
-              ☰
+              <Menu size={20} />
             </button>
             <div>
+              <span className="mono-label">WORKSPACE / INGESTION</span>
               <h1>Knowledge Base</h1>
-              <p className="dashboard-subtitle">Upload documents, then chat with your data.</p>
+              <p className="dashboard-subtitle">Upload documents, then chat with your data in real-time.</p>
             </div>
           </div>
         </header>
 
         {/* Upload section */}
         <section className="upload-section">
-          <div className="upload-card">
-            <div className="upload-icon">📄</div>
-            <h2>Upload Document</h2>
-            <p>Supported: PDF, TXT, MD · Max 50MB</p>
+          <div
+            className={`upload-card ${isDraggingOver ? 'dragging' : ''}`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            <div className="upload-card-header">
+              <div className="window-header-dots">
+                <span className="window-dot window-dot-red" />
+                <span className="window-dot window-dot-yellow" />
+                <span className="window-dot window-dot-green" />
+              </div>
+              <span className="mono-label">INGESTION PIPELINE</span>
+            </div>
+            <div className="upload-card-body">
+              <div className="upload-icon-badge">
+                <UploadCloud size={26} />
+              </div>
+              <h2>Upload Document</h2>
+              <p>Drag and drop your file here, or click to browse (PDF, TXT, MD · Max 50MB)</p>
 
-            <input
-              ref={fileInputRef}
-              id="file-upload-input"
-              type="file"
-              accept=".pdf,.txt,.md"
-              onClick={(e) => {
-                (e.target as HTMLInputElement).value = '';
-              }}
-              onChange={handleFileChange}
-              className="file-input-hidden"
-            />
-            <button
-              id="upload-button"
-              className="btn-primary"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-            >
-              {isUploading ? (
-                <span className="btn-loading">
-                  <span className="spinner-sm"></span> Uploading…
-                </span>
-              ) : (
-                'Choose File'
+              <input
+                ref={fileInputRef}
+                id="file-upload-input"
+                type="file"
+                accept=".pdf,.txt,.md"
+                onClick={(e) => {
+                  (e.target as HTMLInputElement).value = '';
+                }}
+                onChange={handleFileChange}
+                className="file-input-hidden"
+              />
+              <button
+                id="upload-button"
+                className="btn-pill"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+              >
+                {isUploading ? (
+                  <span className="btn-loading">
+                    <span className="spinner-sm"></span> Uploading…
+                  </span>
+                ) : (
+                  <>
+                    <FilePlus size={18} />
+                    <span>Choose File</span>
+                  </>
+                )}
+              </button>
+
+              {uploadMessage && (
+                <p
+                  className={`upload-message ${
+                    uploadMessage.startsWith('❌') ? 'error' : 'success'
+                  }`}
+                  role="status"
+                >
+                  {uploadMessage}
+                </p>
               )}
-            </button>
-
-            {uploadMessage && (
-              <p className={`upload-message ${uploadMessage.startsWith('❌') ? 'error' : 'success'}`}>
-                {uploadMessage}
-              </p>
-            )}
+            </div>
           </div>
         </section>
 
@@ -265,6 +322,7 @@ export default function Dashboard() {
         <section className="documents-section">
           <div className="documents-header">
             <div className="documents-title-group">
+              <span className="mono-label">STORAGE</span>
               <h2>Your Documents ({documents.length})</h2>
               {documents.length > 0 && (
                 <label className="select-all-label">
@@ -283,14 +341,17 @@ export default function Dashboard() {
                 className="btn-danger-bulk"
                 onClick={promptDeleteBulk}
                 disabled={isDeleting}
+                aria-label={`Delete ${selectedDocIds.length} selected documents`}
               >
-                🗑️ Delete Selected ({selectedDocIds.length})
+                <Trash2 size={15} />
+                <span>Delete Selected ({selectedDocIds.length})</span>
               </button>
             )}
           </div>
 
           {documents.length === 0 ? (
             <div className="documents-empty">
+              <Layers size={36} style={{ margin: '0 auto 12px', opacity: 0.4 }} />
               <p>No documents yet. Upload one to get started.</p>
             </div>
           ) : (
@@ -300,19 +361,22 @@ export default function Dashboard() {
                 return (
                   <div
                     key={doc.id}
-                    className={`document-card ${doc.status} ${isSelected ? 'selected' : ''}`}
+                    className={`document-card ${doc.status} ${
+                      isSelected ? 'selected' : ''
+                    }`}
                   >
                     <input
                       type="checkbox"
                       className="doc-checkbox"
                       checked={isSelected}
                       onChange={() => toggleSelectDoc(doc.id)}
+                      aria-label={`Select document ${doc.name}`}
                     />
                     <div className="doc-icon">
                       {doc.status === 'ready' ? (
-                        '✅'
+                        <CheckCircle2 size={20} style={{ color: 'var(--success)' }} />
                       ) : doc.status === 'failed' ? (
-                        '❌'
+                        <XCircle size={20} style={{ color: 'var(--error)' }} />
                       ) : (
                         <span className="spinner-sm amber"></span>
                       )}
@@ -338,8 +402,9 @@ export default function Dashboard() {
                           className="doc-retry-btn"
                           title="Retry uploading file"
                           onClick={() => fileInputRef.current?.click()}
+                          aria-label="Retry upload"
                         >
-                          🔄 Retry
+                          <RotateCw size={15} />
                         </button>
                       )}
                       <button
@@ -347,8 +412,9 @@ export default function Dashboard() {
                         title="Delete Document"
                         onClick={() => promptDeleteSingle(doc.id, doc.name)}
                         disabled={isDeleting}
+                        aria-label={`Delete ${doc.name}`}
                       >
-                        🗑️
+                        <Trash2 size={15} />
                       </button>
                     </div>
                   </div>
@@ -385,4 +451,5 @@ export default function Dashboard() {
     </div>
   );
 }
+
 

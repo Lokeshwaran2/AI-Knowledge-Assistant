@@ -1,5 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import {
+  Brain,
+  Plus,
+  MessageSquare,
+  LayoutDashboard,
+  LogOut,
+  PanelLeftClose,
+  PanelLeft,
+  Trash2,
+  Sun,
+  Moon,
+} from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useChat } from '../contexts/ChatContext';
 import { formatTimeAgo } from '../utils/dateFormatter';
@@ -27,12 +39,39 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
     return localStorage.getItem('sidebar_collapsed') === 'true';
   });
 
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    return (localStorage.getItem('app_theme') as 'light' | 'dark') || 'light';
+  });
+
   const [deletingConvId, setDeletingConvId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // On mobile drawer, ensure sidebar is rendered in full expanded mode
+  const effectiveCollapsed = isCollapsed && !mobileOpen;
 
   useEffect(() => {
     localStorage.setItem('sidebar_collapsed', isCollapsed ? 'true' : 'false');
   }, [isCollapsed]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('app_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+  };
+
+  // Handle escape key to close mobile drawer
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && mobileOpen && onMobileClose) {
+        onMobileClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [mobileOpen, onMobileClose]);
 
   const toggleCollapse = () => {
     setIsCollapsed((prev) => !prev);
@@ -71,7 +110,11 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
     <>
       {/* Mobile Backdrop Overlay */}
       {mobileOpen && (
-        <div className="sidebar-backdrop" onClick={onMobileClose} />
+        <div
+          className="sidebar-backdrop"
+          onClick={onMobileClose}
+          aria-hidden="true"
+        />
       )}
 
       {/* Delete Conversation Confirm Modal Wizard */}
@@ -87,35 +130,72 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
       />
 
       <aside
-        className={`sidebar ${isCollapsed ? 'collapsed' : ''} ${
+        className={`sidebar ${effectiveCollapsed ? 'collapsed' : ''} ${
           mobileOpen ? 'mobile-open' : ''
         }`}
+        aria-label="Application Sidebar Navigation"
       >
         {/* Header */}
         <div className="sidebar-header">
-          {!isCollapsed ? (
+          {!effectiveCollapsed ? (
             <>
-              <div className="sidebar-brand-group" onClick={() => navigate('/dashboard')}>
-                <span className="sidebar-logo">🧠</span>
+              <div
+                className="sidebar-brand-group"
+                onClick={() => navigate('/dashboard')}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => e.key === 'Enter' && navigate('/dashboard')}
+              >
+                <div className="sidebar-logo-icon">
+                  <Brain size={20} />
+                </div>
                 <span className="sidebar-brand">KnowledgeAI</span>
               </div>
-              <button
-                className="sidebar-collapse-btn"
-                onClick={toggleCollapse}
-                title="Minimize Sidebar"
-              >
-                ◀
-              </button>
+              <div className="sidebar-header-actions">
+                <button
+                  className="sidebar-theme-btn"
+                  onClick={toggleTheme}
+                  title={`Switch to ${theme === 'light' ? 'Dark' : 'Emerald Light'} Mode`}
+                  aria-label="Toggle Theme"
+                >
+                  {theme === 'light' ? <Moon size={17} /> : <Sun size={17} />}
+                </button>
+                <button
+                  className="sidebar-collapse-btn"
+                  onClick={toggleCollapse}
+                  title="Collapse Sidebar"
+                  aria-label="Collapse Sidebar"
+                >
+                  <PanelLeftClose size={18} />
+                </button>
+              </div>
             </>
           ) : (
             <div className="sidebar-header-collapsed">
-              <span className="sidebar-logo" onClick={() => navigate('/dashboard')} title="KnowledgeAI">🧠</span>
+              <div
+                className="sidebar-logo-icon"
+                onClick={() => navigate('/dashboard')}
+                title="KnowledgeAI Dashboard"
+                role="button"
+                tabIndex={0}
+              >
+                <Brain size={18} />
+              </div>
+              <button
+                className="sidebar-theme-btn"
+                onClick={toggleTheme}
+                title={`Switch to ${theme === 'light' ? 'Dark' : 'Emerald Light'} Mode`}
+                aria-label="Toggle Theme"
+              >
+                {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+              </button>
               <button
                 className="sidebar-collapse-btn"
                 onClick={toggleCollapse}
                 title="Expand Sidebar"
+                aria-label="Expand Sidebar"
               >
-                ▶
+                <PanelLeft size={18} />
               </button>
             </div>
           )}
@@ -127,10 +207,13 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
             id="new-chat-btn"
             className="btn-primary sidebar-new-chat"
             onClick={handleNewChat}
-            title={isCollapsed ? 'New Chat' : undefined}
+            title={effectiveCollapsed ? 'New Chat' : undefined}
+            aria-label="Start New Chat"
           >
-            <span className="btn-icon">+</span>
-            {!isCollapsed && <span className="btn-text">New Chat</span>}
+            <span className="btn-icon">
+              <Plus size={18} />
+            </span>
+            {!effectiveCollapsed && <span className="btn-text">New Chat</span>}
           </button>
 
           {isDashboard ? (
@@ -140,10 +223,13 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
                 navigate('/chat');
                 if (onMobileClose) onMobileClose();
               }}
-              title={isCollapsed ? 'Go to Chat' : undefined}
+              title={effectiveCollapsed ? 'Go to Chat' : undefined}
+              aria-label="Navigate to Chat"
             >
-              <span className="btn-icon">💬</span>
-              {!isCollapsed && <span className="btn-text">Go to Chat</span>}
+              <span className="btn-icon">
+                <MessageSquare size={18} />
+              </span>
+              {!effectiveCollapsed && <span className="btn-text">Go to Chat</span>}
             </button>
           ) : (
             <button
@@ -152,21 +238,24 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
                 navigate('/dashboard');
                 if (onMobileClose) onMobileClose();
               }}
-              title={isCollapsed ? 'Dashboard' : undefined}
+              title={effectiveCollapsed ? 'Dashboard' : undefined}
+              aria-label="Navigate to Dashboard"
             >
-              <span className="btn-icon">←</span>
-              {!isCollapsed && <span className="btn-text">Dashboard</span>}
+              <span className="btn-icon">
+                <LayoutDashboard size={18} />
+              </span>
+              {!effectiveCollapsed && <span className="btn-text">Dashboard</span>}
             </button>
           )}
         </div>
 
         {/* Conversation History */}
         <div className="sidebar-section">
-          {!isCollapsed && <h3>HISTORY</h3>}
+          {!effectiveCollapsed && <h3>HISTORY</h3>}
           {conversations.length === 0 ? (
-            !isCollapsed && <p className="sidebar-empty">No history yet</p>
+            !effectiveCollapsed && <p className="sidebar-empty">No history yet</p>
           ) : (
-            <ul className="conversation-list">
+            <ul className="conversation-list" role="list">
               {conversations.map((c) => {
                 const isActive = activeConversationId === c.id;
                 const timeAgo = formatTimeAgo(c.last_accessed_at || c.created_at);
@@ -177,21 +266,27 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
                       className={`conversation-item ${isActive ? 'active' : ''}`}
                       onClick={() => handleOpenConversation(c.id)}
                       title={`${c.title} · ${timeAgo}`}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => e.key === 'Enter' && handleOpenConversation(c.id)}
                     >
-                      <span className="conv-icon">💬</span>
-                      {!isCollapsed && (
+                      <span className="conv-icon">
+                        <MessageSquare size={16} />
+                      </span>
+                      {!effectiveCollapsed && (
                         <div className="conv-details">
                           <span className="conv-title">{c.title}</span>
                           <span className="conv-meta">{timeAgo}</span>
                         </div>
                       )}
-                      {!isCollapsed && (
+                      {!effectiveCollapsed && (
                         <button
                           className="conv-delete-btn"
                           onClick={(e) => promptDelete(e, c.id)}
                           title="Delete Conversation"
+                          aria-label={`Delete conversation ${c.title}`}
                         >
-                          🗑️
+                          <Trash2 size={15} />
                         </button>
                       )}
                     </div>
@@ -204,7 +299,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
 
         {/* Footer */}
         <div className="sidebar-footer">
-          {!isCollapsed ? (
+          {!effectiveCollapsed ? (
             <>
               <div className="user-profile" title={user?.email}>
                 <span className="user-avatar">{user?.email?.charAt(0).toUpperCase() || 'U'}</span>
@@ -215,8 +310,9 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
                 onClick={logout}
                 className="logout-btn"
                 title="Sign Out"
+                aria-label="Sign Out"
               >
-                Sign Out
+                <LogOut size={16} />
               </button>
             </>
           ) : (
@@ -228,8 +324,9 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
                 onClick={logout}
                 className="logout-btn-icon"
                 title={`Sign Out (${user?.email})`}
+                aria-label="Sign Out"
               >
-                🚪
+                <LogOut size={16} />
               </button>
             </div>
           )}
@@ -238,3 +335,4 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
     </>
   );
 }
+

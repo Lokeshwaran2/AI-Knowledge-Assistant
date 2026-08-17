@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Brain, Mail, Lock, ArrowRight, Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Login() {
@@ -34,7 +35,9 @@ export default function Login() {
       <div className="login-card">
         {/* Header */}
         <div className="login-header">
-          <div className="login-logo">🧠</div>
+          <div className="login-logo">
+            <Brain size={30} />
+          </div>
           <h1 className="login-title">AI Knowledge Assistant</h1>
           <p className="login-subtitle">
             {isRegisterMode
@@ -45,32 +48,66 @@ export default function Login() {
 
         {/* Form */}
         <form className="login-form" onSubmit={handleSubmit} id="auth-form">
-          {error && <div className="form-error" role="alert">{error}</div>}
+          {error && (
+            <div className="form-error" role="alert">
+              {error}
+            </div>
+          )}
 
           <div className="form-group">
             <label htmlFor="email-input">Email address</label>
-            <input
-              id="email-input"
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoFocus
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                id="email-input"
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoFocus
+                autoComplete="email"
+                style={{ paddingLeft: '38px' }}
+              />
+              <Mail
+                size={18}
+                style={{
+                  position: 'absolute',
+                  left: '12px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-muted)',
+                  pointerEvents: 'none',
+                }}
+              />
+            </div>
           </div>
 
           <div className="form-group">
             <label htmlFor="password-input">Password</label>
-            <input
-              id="password-input"
-              type="password"
-              placeholder={isRegisterMode ? 'At least 6 characters' : 'Your password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                id="password-input"
+                type="password"
+                placeholder={isRegisterMode ? 'At least 6 characters' : 'Your password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+                autoComplete={isRegisterMode ? 'new-password' : 'current-password'}
+                style={{ paddingLeft: '38px' }}
+              />
+              <Lock
+                size={18}
+                style={{
+                  position: 'absolute',
+                  left: '12px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-muted)',
+                  pointerEvents: 'none',
+                }}
+              />
+            </div>
           </div>
 
           <button
@@ -78,12 +115,18 @@ export default function Login() {
             type="submit"
             className="btn-primary"
             disabled={isLoading}
+            style={{ width: '100%', marginTop: '8px' }}
           >
-            {isLoading
-              ? 'Please wait…'
-              : isRegisterMode
-              ? 'Create Account'
-              : 'Sign In'}
+            {isLoading ? (
+              <span className="btn-loading">
+                <Loader2 size={18} className="spinner-sm" /> Please wait…
+              </span>
+            ) : (
+              <>
+                <span>{isRegisterMode ? 'Create Account' : 'Sign In'}</span>
+                <ArrowRight size={18} />
+              </>
+            )}
           </button>
         </form>
 
@@ -93,7 +136,11 @@ export default function Login() {
           <button
             id="auth-toggle-button"
             className="toggle-link"
-            onClick={() => { setIsRegisterMode((m) => !m); setError(''); }}
+            type="button"
+            onClick={() => {
+              setIsRegisterMode((m) => !m);
+              setError('');
+            }}
           >
             {isRegisterMode ? 'Sign In' : 'Create Account'}
           </button>
@@ -102,3 +149,4 @@ export default function Login() {
     </div>
   );
 }
+

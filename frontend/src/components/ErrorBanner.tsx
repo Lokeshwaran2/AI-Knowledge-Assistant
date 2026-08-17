@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { AlertCircle, X } from 'lucide-react';
 import { useChat } from '../contexts/ChatContext';
 
 interface Props {
@@ -21,9 +22,21 @@ export default function ErrorBanner({ onClose }: Props) {
   if (!error) return null;
 
   return (
-    <div className="error-banner" role="alert">
-      <span>⚠️ {error}</span>
-      <button onClick={() => { clearError(); onClose(); }} className="error-close">✕</button>
+    <div className="error-banner" role="alert" aria-live="assertive">
+      <AlertCircle size={16} />
+      <span>{error}</span>
+      <button
+        onClick={() => {
+          clearError();
+          onClose();
+        }}
+        className="error-close"
+        aria-label="Dismiss error"
+        type="button"
+      >
+        <X size={14} />
+      </button>
     </div>
   );
 }
+
