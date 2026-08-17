@@ -1,10 +1,19 @@
-import { useState, useRef, type KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
+import { ArrowUp, Square } from 'lucide-react';
 import { useChat } from '../contexts/ChatContext';
 
 export default function ChatInput() {
   const { sendMessage, stopGenerating, isSending } = useChat();
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize textarea based on input content height
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
+    }
+  }, [value]);
 
   const handleSend = async () => {
     if (isSending) {
@@ -14,6 +23,9 @@ export default function ChatInput() {
     if (!value.trim()) return;
     const msg = value.trim();
     setValue('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
     await sendMessage(msg);
     textareaRef.current?.focus();
   };
@@ -36,6 +48,7 @@ export default function ChatInput() {
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
         rows={1}
+        aria-label="Ask a question about your documents"
       />
       <button
         id="chat-send-button"
@@ -43,17 +56,16 @@ export default function ChatInput() {
         onClick={handleSend}
         disabled={!isSending && !value.trim()}
         title={isSending ? 'Stop generating' : 'Send message'}
+        aria-label={isSending ? 'Stop generating' : 'Send message'}
+        type="button"
       >
         {isSending ? (
-          <span className="stop-icon" title="Stop generating">
-            ⏹
-          </span>
+          <Square size={16} fill="currentColor" />
         ) : (
-          <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-          </svg>
+          <ArrowUp size={18} />
         )}
       </button>
     </div>
   );
 }
+

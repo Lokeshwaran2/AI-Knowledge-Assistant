@@ -3,7 +3,13 @@
 
 export const AI_CONFIG = {
   // Groq LLM settings
-  model: 'llama-3.3-70b-versatile',
+  model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
+  fallbackModels: [
+    'qwen/qwen3.6-27b',
+    'openai/gpt-oss-20b',
+    'groq/compound',
+    'groq/compound-mini',
+  ],
   temperature: 0.2,        // Low = deterministic, grounded responses
   maxTokens: 512,          // Cost control — cap response length
   timeoutMs: 30000,        // 30s LLM timeout guard
